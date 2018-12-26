@@ -1,19 +1,20 @@
 #include <iostream>
 #include <ctime>
+#include <iomanip>
 #include <mpi.h>
 
 using namespace std;
 
 #define ROOT 0 // Процесс ранга 0 - корневой процесс
 
-int curr_rank;   // Текущий ранг процесса
-int num_process; // Число процессов
+int procRank;   // Текущий ранг процесса
+int procNum; // Число процессов
 
 int *CreateArray(int size)
 {
     int *arr;
     arr = new int[size];
-    srand(time(NULL));
+    srand(time(nullptr));
 
     for (int i = 0; i < size; i++)
         arr[i] = rand() % 1000 - 500;
@@ -25,14 +26,6 @@ void PrintArray(int *arr, int size)
     for (int i = 0; i < size; i++)
         cout << arr[i] << " ";
     cout << endl;
-}
-
-// Сравнение и обмен элементов
-void Swap(int &a1, int &a2)
-{
-    int tmp = a1;
-    a1 = a2;
-    a2 = tmp;
 }
 
 void Radix(int byte, int N, int *source, int *dest)
@@ -55,12 +48,18 @@ void Radix(int byte, int N, int *source, int *dest)
     for (int i = 1; i < 256; i++)
         offset[i] = offset[i - 1] + count[i - 1];
 
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < N; i++)
     {
         if (byte == 3)
+        {
             dest[offset[((source[i] >> (byte * 8)) + 128) & 0xff]++] = source[i];
+            //PrintArray(dest, N);
+        }
         else
+        {
             dest[offset[((source[i]) >> (byte * 8)) & 0xff]++] = source[i];
+            //PrintArray(dest, N);
+        }
     }
 }
 
@@ -76,16 +75,16 @@ void radixsort(int *source, int N)
 
 void Calc_work_and_displs(int *displs, int *send_num_work, int size)
 {
-    int mid_workload = size / num_process;
-    int remainder = size % num_process;
+    int mid_workload = size / procNum;
+    int remainder = size % procNum;
 
-    for (int i = 0; i < remainder; ++i)
+    for (int i = 0; i < remainder; i++)
     {
         displs[i] = i * (mid_workload + 1);
         send_num_work[i] = mid_workload + 1;
     }
 
-    for (int i = remainder; i < num_process; ++i)
+    for (int i = remainder; i < procNum; i++)
     {
         displs[i] = mid_workload * i + remainder;
         send_num_work[i] = mid_workload;
@@ -94,31 +93,31 @@ void Calc_work_and_displs(int *displs, int *send_num_work, int size)
 
 int main(int argc, char *argv[])
 {
-    int *Array_Radix_Seq = NULL;
-    int *Array_Radix_Pp = NULL;
+    int *Array_Radix_Seq = nullptr;
+    int *Array_Radix_Pp = nullptr;
 
     int *displs;        // Массив смещений относительно начала буфера Array
-    int *send_num_work; // Массив кол-ва работы для каждого процесса
+    int *sendNumWork; // Массив кол-ва работы для каждого процесса
     int *rbuf;
 
     int size = 0;
 
-    double sequentTimeWorkBubble = 0;
-    double parallelTimeWorkQsort = 0;
+    double sequentTime = 0;
+    double parallelTime = 0;
 
-    double Total_sequentTimeWorkBubble = 0;
-    double Total_parallelTimeWorkQsort = 0;
+    double totalSequentTime = 0;
+    double totalParallelTime = 0;
 
     MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &num_process);
-    MPI_Comm_rank(MPI_COMM_WORLD, &curr_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &procNum);
+    MPI_Comm_rank(MPI_COMM_WORLD, &procRank);
 
-    if (curr_rank == ROOT)
+    if (procRank == ROOT)
     {
         /*cout << "Enter size of array: " << endl;
         cin >> size;*/
-        //size = atoi(argv[1]);
-        size = 100;
+        size = atoi(argv[1]);
+        //size = 5;
 
         Array_Radix_Seq = CreateArray(size);
 
@@ -136,9 +135,9 @@ int main(int argc, char *argv[])
         }
 
         // Сортировка lsd radix sort последовательной версии
-        sequentTimeWorkBubble = MPI_Wtime();
+        sequentTime = MPI_Wtime();
         radixsort(Array_Radix_Seq, size);
-        Total_sequentTimeWorkBubble = MPI_Wtime() - sequentTimeWorkBubble;
+        totalSequentTime = MPI_Wtime() - sequentTime;
 
         if (size < 500)
         {
@@ -148,21 +147,21 @@ int main(int argc, char *argv[])
     }
 
     // Parallel
-    if (curr_rank == ROOT)
-        parallelTimeWorkQsort = MPI_Wtime();
+    if (procRank == ROOT)
+        parallelTime = MPI_Wtime();
 
-    send_num_work = new int[num_process];
-    displs = new int[num_process];
+    sendNumWork = new int[procNum];
+    displs = new int[procNum];
 
     // Передаем размер от корневого процесса всем процессам
     MPI_Bcast(&size, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
     // Подсчитываем массив смещение и кол-ва работы
-    Calc_work_and_displs(displs, send_num_work, size);
+    Calc_work_and_displs(displs, sendNumWork, size);
 
-    rbuf = new int[send_num_work[curr_rank]];
+    rbuf = new int[sendNumWork[procRank]];
 
-    int N = send_num_work[curr_rank];
+    int N = sendNumWork[procRank];
 
     int count[256];
     int offset[256];
@@ -170,10 +169,10 @@ int main(int argc, char *argv[])
 
     MPI_Status status;
 
-    for (int byte = 0; byte < 4; ++byte)
+    for (int byte = 0; byte < 4; byte++) // для каждого из 4х байтов числа выполняется:
     {
         //	Делим массивы на блоки
-        MPI_Scatterv(Array_Radix_Pp, send_num_work, displs, MPI_INT, rbuf, N, MPI_INT, ROOT, MPI_COMM_WORLD);
+        MPI_Scatterv(Array_Radix_Pp, sendNumWork, displs, MPI_INT, rbuf, N, MPI_INT, ROOT, MPI_COMM_WORLD);
 
         for (int i = 0; i < 256; i++)
             count[i] = 0;
@@ -193,80 +192,96 @@ int main(int argc, char *argv[])
         for (int i = 1; i < 256; ++i)
             offset[i] = offset[i - 1] + GCount[i - 1];
 
-        int *Sizes_of_Arrs = new int[num_process];
+        int *sizesOfArrs = new int[procNum];
 
         // Зная offset, можно создать массивы для всех процессов определенного размера
-        int **NewArr;
-        int CurrSizeArr; // максимальное число элементов в массиве NewArr[i]
-        NewArr = new int *[num_process];
-        for (int i = 0; i < num_process; i++)
+        int **newArr;
+        int maxSizeArr; // максимальное число элементов в массиве NewArr[i]
+        newArr = new int *[procNum];
+        for (int i = 0; i < procNum; i++)
         {
-            CurrSizeArr = 0;
+            maxSizeArr = 0;
 
-            for (int j = i * 256 / num_process; j < (i + 1) * 256 / num_process; j++)
-                CurrSizeArr += GCount[j];
-
-            if (CurrSizeArr > 0)
-            {
-                NewArr[i] = new int[CurrSizeArr];
-                Sizes_of_Arrs[i] = CurrSizeArr;
+            for (int j = i * 256 / procNum; j < (i + 1) * 256 / procNum; j++)
+            {  
+                maxSizeArr += GCount[j];
             }
+
+            if (maxSizeArr > 0)
+            {
+                newArr[i] = new int[maxSizeArr];
+                sizesOfArrs[i] = maxSizeArr;
+            }
+
             else
             {
-                NewArr[i] = NULL;
-                Sizes_of_Arrs[i] = 0;
+                newArr[i] = nullptr;
+                sizesOfArrs[i] = 0;
             }
         }
 
-        int *index = new int[num_process]; // значение index[i] определяет положение элемента rbuf[i] в массиве NewArr[j]
-                                           // /количество элементов, который вошли в NewArr[i](размер)
-        for (int i = 0; i < num_process; i++)
+        int *index = new int[procNum]; // значение index[i] определяет положение элемента rbuf[i] в массиве NewArr[j]
+                                           
+        for (int i = 0; i < procNum; i++)
             index[i] = 0;
 
-        for (int i = 0; i < N; ++i)
+        for (int i = 0; i < N; i++)
         {
-            int ind; // байт с номером byte у элемента rbuf[i]
+            int ind; // байт у элемента rbuf[i]
             if (byte == 3)
                 ind = ((rbuf[i] >> (byte * 8)) + 128) & 0xff;
-            else
+            else {
                 ind = ((rbuf[i]) >> (byte * 8)) & 0xff;
+                //cout <<"procRanc = "<< procRank << "    rbuf[i] = " << rbuf[i] << "    ind = " << ind << endl;
+                //cout << endl;
+            }
 
             //И смотрим на элемент который поступил
             int j = 0;
-            for (; j < num_process; ++j)
-                if (j * 256 / num_process <= ind && ind < (j + 1) * 256 / num_process)
+            for (; j < procNum; j++)
+                if (j * 256 / procNum <= ind && ind < (j + 1) * 256 / procNum)
                     break;
 
             //Если он в j диапазоне массива смещений то располагаем элементы в j новый массив
             // Потом смотрим следующий элемент и так далее распределяем по массивам которые мы создали
-            if (Sizes_of_Arrs[j] > 0)
+
+            // поступил 33ий байт(число n) - для 4х процессов и количестве чисел попадающий в этот байт = 5
+            /* n 0 0 0       35ый(m) ->   n 0 0 0        70ый(k) ->  n 0 0 0 
+               0 0 0 0                    m 0 0 0                    m 0 0 0 
+               0 0 0 0                    0 0 0 0                    0 k 0 0 
+               0 0 0 0                    0 0 0 0                    0 0 0 0 
+               0 0 0 0                    0 0 0 0                    0 0 0 0 
+            */
+            if (sizesOfArrs[j] > 0)
             {
-                NewArr[j][index[j]] = rbuf[i];
+                newArr[j][index[j]] = rbuf[i];
+                //cout <<"procRanc = " << procRank << "    rbuf[i] = " << rbuf[i] << "    ind = " << ind 
+                 //   << "    j = " << j << "    index[j] = " <<index[j] << endl;
                 index[j]++;
             }
         }
 
         // В этот массив соберем все размеры буферов других процессов с соответствующим диапазоном
-        int *Gindex = new int[num_process];
+        int *Gindex = new int[procNum];
         MPI_Alltoall(index, 1, MPI_INT, Gindex, 1, MPI_INT, MPI_COMM_WORLD);
         // Sends data from all to all processes
 
         // Полученные буферы. Например, RecvBuffers[i] - буфер, полученный от i-ого процесса
-        int **RecvBuffers = new int *[num_process];
-        for (int i = 0; i < num_process; i++)
+        int **RecvBuffers = new int *[procNum];
+        for (int i = 0; i < procNum; i++)
         {
             if (Gindex[i] > 0)
                 RecvBuffers[i] = new int[Gindex[i]];
             else
-                RecvBuffers[i] = NULL;
+                RecvBuffers[i] = nullptr;
         }
 
         // Выполняем отсылку буферов другим процессам, ожидая так же, что эти процессы пришлют буферы и отправляющему процессу
-        for (int i = 0; i < num_process; i++)
+        for (int i = 0; i < procNum; i++)
         {
-            if (i != curr_rank)
+            if (i != procRank)
             {
-                MPI_Sendrecv(NewArr[i], index[i], MPI_INT, i, 1, RecvBuffers[i],
+                MPI_Sendrecv(newArr[i], index[i], MPI_INT, i, 1, RecvBuffers[i],
                     Gindex[i], MPI_INT, i, 1, MPI_COMM_WORLD, &status);
             }
         }
@@ -274,12 +289,12 @@ int main(int argc, char *argv[])
         // i-ый процесс объединяем все свои полученные куски массива и свой кусок,
         // который он создал(NewArr[i]) в 1 массив tmpbuf в той последовательности, в который они шли в Array_Radix_PP
         int *tmpbuf;
-        if (Sizes_of_Arrs[curr_rank] > 0)
+        if (sizesOfArrs[procRank] > 0)
         {
-            tmpbuf = new int[Sizes_of_Arrs[curr_rank]];
-            for (int i = 0, k = 0; i < num_process; i++)
+            tmpbuf = new int[sizesOfArrs[procRank]];
+            for (int i = 0, k = 0; i < procNum; i++)
             {
-                if (i != curr_rank)
+                if (i != procRank)
                 {
                     for (int j = 0; j < Gindex[i]; j++)
                         tmpbuf[k++] = RecvBuffers[i][j];
@@ -287,20 +302,23 @@ int main(int argc, char *argv[])
                 else
                 {
                     for (int j = 0; j < index[i]; j++)
-                        tmpbuf[k++] = NewArr[i][j];
+                        tmpbuf[k++] = newArr[i][j];
                 }
             }
         }
         else
-            tmpbuf = NULL;
+            tmpbuf = nullptr;
 
         /* Распределяем по нужным местам(сортируем)*/
         int lim = 0; // смещение, чтобы записать на нужную позицию свеого массива
-        for (int i = 0; i < curr_rank; i++)
-            lim += Sizes_of_Arrs[i];
+        for (int i = 0; i < procRank; i++) {
+            lim += sizesOfArrs[i];
+            /*cout << "procRanc = " << procRank << "    lim = " << lim 
+                << "    Sizes_of_Arrs[i] = " << sizesOfArrs[i] << "   byte = " << byte << endl<<endl;*/
+        }
 
-        int *dest = new int[Sizes_of_Arrs[curr_rank]];
-        for (int i = 0; i < Sizes_of_Arrs[curr_rank]; i++)
+        int *dest = new int[sizesOfArrs[procRank]];
+        for (int i = 0; i < sizesOfArrs[procRank]; i++)
         {
             if (byte == 3)
                 dest[offset[((tmpbuf[i] >> (byte * 8)) + 128) & 0xff]++ - lim] = tmpbuf[i];
@@ -309,38 +327,38 @@ int main(int argc, char *argv[])
         }
 
         // Смещения для Gatherv
-        int *displs_1 = new int[num_process];
+        int *displs_1 = new int[procNum];
 
-        memset(displs_1, 0, sizeof(int) * num_process);
+        memset(displs_1, 0, sizeof(int) * procNum);
         displs_1[0] = 0;
-        for (int i = 1; i < num_process; i++)
-            displs_1[i] = displs_1[i - 1] + Sizes_of_Arrs[i - 1];
+        for (int i = 1; i < procNum; i++)
+            displs_1[i] = displs_1[i - 1] + sizesOfArrs[i - 1];
 
         // Собираем все в один массив. Array_Radix_Pp будет отсортирован по байту byte
-        MPI_Gatherv(dest, Sizes_of_Arrs[curr_rank], MPI_INT, Array_Radix_Pp, Sizes_of_Arrs,
+        MPI_Gatherv(dest, sizesOfArrs[procRank], MPI_INT, Array_Radix_Pp, sizesOfArrs,
             displs_1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
         delete[] displs_1;
         delete[] dest;
         delete[] tmpbuf;
 
-        for (int i = 0; i < num_process; i++)
+        for (int i = 0; i < procNum; i++)
             delete[] RecvBuffers[i];
 
         delete[] RecvBuffers;
         delete[] Gindex;
         delete[] index;
 
-        for (int i = 0; i < num_process; i++)
-            delete[] NewArr[i];
+        for (int i = 0; i < procNum; i++)
+            delete[] newArr[i];
 
-        delete[] NewArr;
-        delete[] Sizes_of_Arrs;
+        delete[] newArr;
+        delete[] sizesOfArrs;
     }
 
-    if (curr_rank == ROOT)
+    if (procRank == ROOT)
     {
-        Total_parallelTimeWorkQsort = MPI_Wtime() - parallelTimeWorkQsort;
+        totalParallelTime = MPI_Wtime() - parallelTime;
 
         if (size < 500)
         {
@@ -349,8 +367,8 @@ int main(int argc, char *argv[])
             cout << endl;
         }
 
-        cout << "Time sequence version LSD Radix Sort: " << Total_sequentTimeWorkBubble << " sec." << endl;
-        cout << "Time parallel version LSD Radix Sort: " << Total_parallelTimeWorkQsort << " sec." << endl;
+        cout << "Time of sequence version LSD Radix Sort: " << fixed << setprecision(5) << totalSequentTime << " sec." << endl;
+        cout << "Time of parallel version LSD Radix Sort: " << setprecision(5) << totalParallelTime << " sec." << endl;
 
         cout << endl;
 
@@ -373,7 +391,7 @@ int main(int argc, char *argv[])
     }
 
     delete[] Array_Radix_Pp;
-    delete[] send_num_work;
+    delete[] sendNumWork;
     delete[] displs;
     delete[] rbuf;
 
