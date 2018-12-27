@@ -6,11 +6,46 @@
 using namespace std;
 
 
-void InitializeMatrix(int *matrix, const int matrixSize);
-void MultiplyMatrices(int *matrixA, int *matrixB, int *resultMatrix, const int l, const int m, const int n);
-void CheckResults(int *linearResultingMatrix, int *parallelResultingMatrix, const int matrixSize);
-void PrintMatrix(int *matrix, const int size, const int columns);
-void Flip(int *&matrix, int rows, int columns);
+void InitializeMatrix(int *matrix, const int matrixSize)
+{
+    for (int i = 0; i < matrixSize; i++)
+        matrix[i] = rand() % 100;
+}
+
+void MultiplyMatrices(int *matrixA, int *matrixB, int *resultMatrix, const int l, const int m, const int n)
+{
+    for (int i = 0; i < l; i++)
+        for (int j = 0; j < n; j++)
+        {
+            resultMatrix[i * n + j] = 0;
+            for (int k = 0; k < m; k++)
+                resultMatrix[i * n + j] += matrixA[i * m + k] * matrixB[k * n + j];
+        }
+}
+
+
+void CheckResults(int *linearResultingMatrix, int *parallelResultingMatrix, const int matrixSize)
+{
+    for (int i = 0; i < matrixSize; i++)
+        if (linearResultingMatrix[i] != parallelResultingMatrix[i])
+        {
+            cout << "Error! Linear and parallel results are not equal" << endl;
+            return;
+        }
+    cout << "Matrices are equal" << endl;
+}
+
+
+void PrintMatrix(int *matrix, const int size, const int columns)
+{
+    for (int i = 0; i < size; i++)
+    {
+        if (i % columns == 0)
+            cout << endl;
+        cout << matrix[i];
+    }
+    cout << endl << endl;
+}
 
 int main(int argc, char **argv)
 {
@@ -57,7 +92,7 @@ int main(int argc, char **argv)
         rowsPerProc = aRows / procNum;
         remainingRows = aRows - (procNum - 1) * rowsPerProc;
 
-        matrixA = new int [aSize];
+        matrixA = new int[aSize];
     }
 
     /***********************Parallel***********************/
@@ -70,11 +105,11 @@ int main(int argc, char **argv)
     MPI_Bcast(&rowsPerProc, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&remainingRows, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    matrixB = new int [bSize];
-    elementsPerProcScatter = new int [procNum];
-    elementsPerProcGather = new int [procNum];
-    shiftsScatter = new int [procNum];
-    shiftsGather = new int [procNum];
+    matrixB = new int[bSize];
+    elementsPerProcScatter = new int[procNum];
+    elementsPerProcGather = new int[procNum];
+    shiftsScatter = new int[procNum];
+    shiftsGather = new int[procNum];
 
     if (procRank == 0)
     {
@@ -92,9 +127,8 @@ int main(int argc, char **argv)
         elementsPerProcScatter[procNum - 1] = remainingRows * aColumns;
         elementsPerProcGather[procNum - 1] = remainingRows * bColumns;
 
-        parallelResultingMatrix = new int [aRows * bColumns];
+        parallelResultingMatrix = new int[aRows * bColumns];
     }
-    Flip(matrixB, aRows, aColumns);
 
     MPI_Bcast(matrixB, bSize, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(elementsPerProcScatter, procNum, MPI_INT, 0, MPI_COMM_WORLD);
@@ -105,8 +139,8 @@ int main(int argc, char **argv)
     if (procRank == procNum - 1)
         rowsPerProc = remainingRows;
 
-    bufferA = new int [rowsPerProc * aColumns];
-    resultBuffer = new int [rowsPerProc * bColumns];
+    bufferA = new int[rowsPerProc * aColumns];
+    resultBuffer = new int[rowsPerProc * bColumns];
 
     MPI_Scatterv(matrixA, elementsPerProcScatter, shiftsScatter, MPI_INT, bufferA,
         elementsPerProcScatter[procRank], MPI_INT, 0, MPI_COMM_WORLD);
@@ -124,7 +158,7 @@ int main(int argc, char **argv)
         /****************************************************************/
 
         /***********************Linear***********************/
-        linearResultingMatrix = new int [aRows * bColumns];
+        linearResultingMatrix = new int[aRows * bColumns];
 
         startTime = MPI_Wtime();
         MultiplyMatrices(matrixA, matrixB, linearResultingMatrix, aRows, aColumns, bColumns);
@@ -134,7 +168,6 @@ int main(int argc, char **argv)
         /****************************************************************/
 
         CheckResults(linearResultingMatrix, parallelResultingMatrix, aRows * bColumns);
-        cout << "Performance difference: " << setprecision (6) << ((linearTime / parallelTime) * 100) << "%" << endl;
 
         delete[] matrixA;
         delete[] linearResultingMatrix;
@@ -152,59 +185,4 @@ int main(int argc, char **argv)
     delete[] shiftsGather;
 
     return 0;
-}
-
-
-
-void InitializeMatrix(int *matrix, const int matrixSize)
-{
-    for (int i = 0; i < matrixSize; i++)
-        matrix[i] = rand() % 100;
-}
-
-void MultiplyMatrices(int *matrixA, int *matrixB, int *resultMatrix, const int l, const int m, const int n)
-{
-    for (int i = 0; i < l; i++)
-        for (int j = 0; j < n; j++)
-        {
-            resultMatrix[i * n + j] = 0;
-            for (int k = 0; k < m; k++)
-                resultMatrix[i * n + j] += matrixA[i * m + k] * matrixB[k * n + j];
-        }
-}
-
-void CheckResults(int *linearResultingMatrix, int *parallelResultingMatrix, const int matrixSize)
-{
-    for (int i = 0; i < matrixSize; i++)
-        if (linearResultingMatrix[i] != parallelResultingMatrix[i])
-        {
-            cout <<"Error! Linear and parallel results are not equal" << endl;
-            return;
-        }
-    cout << "Matrices are equal" << endl;
-}
-
-void PrintMatrix(int *matrix, const int size, const int columns)
-{
-    for (int i = 0; i < size; i++)
-    {
-        if (i % columns == 0)
-            cout << endl;
-        cout << matrix[i];
-    }
-    cout << endl << endl;
-}
-
-void Flip(int *&matrix, int rows, int columns)
-{
-    int temp = 0;
-    for (int i = 0; i < rows; i++)
-    {
-        for (int j = i + 1; j < columns; j++)
-        {
-            temp = matrix[i * rows + j];
-            matrix[i * rows + j] = matrix[j* columns + i];
-            matrix[j* columns + i] = temp;
-        }
-    }
 }
